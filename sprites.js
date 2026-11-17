@@ -1,4 +1,4 @@
-import { customSprites } from "./assets_loader.js";
+import { customSprites, customProps } from "./assets_loader.js";
 
 const CLASS_PALETTES = {
   Knight: { body: "#8c99a8", trim: "#e0b841", cloak: "#7a1c28", helm: "#aebac9" },
@@ -46,6 +46,13 @@ export function drawSiteOfGrace(ctx, x, y, tick) {
 
 export function drawProp(ctx, prop) {
   const { type, x, y } = prop;
+
+  if (customProps[type]) {
+    const img = customProps[type];
+    ctx.drawImage(img, Math.round(x - img.width / 2), Math.round(y - img.height));
+    return;
+  }
+
   if (type === "chapel") {
     ctx.fillStyle = "rgba(0,0,0,0.45)";
     ctx.fillRect(x - 54, y - 6, 108, 12);
