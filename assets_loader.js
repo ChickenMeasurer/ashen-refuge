@@ -21,6 +21,7 @@ const PROP_FILES = {
   chapel: "chapel.png",
   blacksmith: "blacksmith.png",
   tavern: "tavern.png",
+  boogersorcerer: "sorcerer.png",
 };
 
 function loadImage(src, onLoad) {
