@@ -55,12 +55,12 @@ let cam = { x: GRACE.x, y: GRACE.y, zoom: 1.5 };
 let activeSoapstone = null;
 let lastMoveSent = 0;
 
-// Map Builder Mode state (Creator Sovereign only)
-let builderMode = false;
-let builderPropType = "chapel";
+// Map  Mode state (Creator Sovereign only)
+let Mode = false;
+let PropType = "chapel";
 let selectedProp = null;
 let draggingProp = false;
-const BUILDER_TYPES = ["chapel", "arch", "lantern", "tree", "grave"];
+const BUILDER_TYPES = ["chapel", "arch", "lantern", "tree", "grave", "boogersorcerer"];
 
 function resize() {
   const rect = shell.getBoundingClientRect();
