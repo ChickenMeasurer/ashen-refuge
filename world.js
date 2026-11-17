@@ -55,6 +55,13 @@ let cam = { x: GRACE.x, y: GRACE.y, zoom: 1.5 };
 let activeSoapstone = null;
 let lastMoveSent = 0;
 
+// Map Builder Mode state (Creator Sovereign only)
+let builderMode = false;
+let builderPropType = "chapel";
+let selectedProp = null;
+let draggingProp = false;
+const BUILDER_TYPES = ["chapel", "arch", "lantern", "tree", "grave"];
+
 function resize() {
   const rect = shell.getBoundingClientRect();
   if (rect.width > 0 && rect.height > 0) {
@@ -71,6 +78,7 @@ const net = new VillageNetwork({
   onMessage(msg) {
     if (msg.type === "player_joined") {
       const p = msg.player;
+      npcs = npcs.filter((n) => n.username.toLowerCase() !== p.username.toLowerCase());
       if (!net.user || p.username !== net.user.username) {
         players.set(p.username, { ...p, targetX: p.x, targetY: p.y, summonTimer: 90 });
       }
@@ -194,10 +202,30 @@ for (let i = 0; i < 80; i++) {
   });
 }
 
-canvas.addEventListener("click", (e) => {
+function screenToWorld(e) {
   const rect = canvas.getBoundingClientRect();
-  const wx = (e.clientX - rect.left - canvas.width / 2) / cam.zoom + cam.x;
-  const wy = (e.clientY - rect.top - canvas.height / 2) / cam.zoom + cam.y;
+  return {
+    x: Math.round((e.clientX - rect.left - canvas.width / 2) / cam.zoom + cam.x),
+    y: Math.round((e.clientY - rect.top - canvas.height / 2) / cam.zoom + cam.y),
+  };
+}
+
+canvas.addEventListener("mousedown", (e) => {
+  const { x: wx, y: wy } = screenToWorld(e);
+
+  if (builderMode && net.user && net.user.is_admin) {
+    const hit = props.find((p) => Math.hypot(p.x - wx, p.y - wy) < 24);
+    if (hit) {
+      selectedProp = hit;
+      draggingProp = true;
+    } else {
+      const created = { type: builderPropType, x: wx, y: wy };
+      props.push(created);
+      selectedProp = created;
+      draggingProp = true;
+    }
+    return;
+  }
 
   const hitStone = soapstones.find((s) => Math.hypot(s.x - wx, s.y - wy) < 18);
   if (hitStone) {
@@ -217,11 +245,45 @@ canvas.addEventListener("click", (e) => {
   }
 });
 
+canvas.addEventListener("mousemove", (e) => {
+  if (!builderMode || !draggingProp || !selectedProp || !net.user || !net.user.is_admin) return;
+  const { x: wx, y: wy } = screenToWorld(e);
+  selectedProp.x = wx;
+  selectedProp.y = wy;
+});
+
+window.addEventListener("mouseup", () => {
+  draggingProp = false;
+});
+
 window.addEventListener("keydown", (e) => {
   if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") return;
-  keys[e.key.toLowerCase()] = true;
-  if (e.key.toLowerCase() === "h") {
+  const k = e.key.toLowerCase();
+  keys[k] = true;
+
+  if (k === "h") {
     document.querySelectorAll(".hud-element").forEach((el) => el.classList.toggle("hidden"));
+  } else if (k === "b") {
+    if (!net.user || !net.user.is_admin) return;
+    builderMode = !builderMode;
+    selectedProp = null;
+    draggingProp = false;
+    showBanner(builderMode ? "MAP BUILDER: ON [B]" : "MAP BUILDER: OFF");
+  } else if (builderMode && e.key === "Tab") {
+    e.preventDefault();
+    const idx = BUILDER_TYPES.indexOf(builderPropType);
+    builderPropType = BUILDER_TYPES[(idx + 1) % BUILDER_TYPES.length];
+  } else if (builderMode && (e.key === "Delete" || e.key === "Backspace") && selectedProp) {
+    const idx = props.indexOf(selectedProp);
+    if (idx !== -1) props.splice(idx, 1);
+    selectedProp = null;
+  } else if (builderMode && k === "c") {
+    const formatted =
+      "const props = [\n" +
+      props.map((p) => `  { type: "${p.type}", x: ${Math.round(p.x)}, y: ${Math.round(p.y)} },`).join("\n") +
+      "\n];";
+    navigator.clipboard.writeText(formatted);
+    showBanner("COPIED PROPS TO CLIPBOARD!");
   }
 });
 window.addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
@@ -323,16 +385,16 @@ function update() {
 function drawGround() {
   // Deep mossy earth outer terrain
   if (customWorlds[atmosphere]) {
-  ctx.drawImage(customWorlds[atmosphere], 0, 0, WORLD_W, WORLD_H);
-  if (targetWaypoint) {
-    ctx.strokeStyle = "rgba(212, 175, 55, 0.85)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.ellipse(targetWaypoint.x, targetWaypoint.y, 10, 5, 0, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.drawImage(customWorlds[atmosphere], 0, 0, WORLD_W, WORLD_H);
+    if (targetWaypoint) {
+      ctx.strokeStyle = "rgba(212, 175, 55, 0.85)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(targetWaypoint.x, targetWaypoint.y, 10, 5, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    return;
   }
-  return;
-}
   ctx.fillStyle = atmosphere === "eclipse" ? "#140b10" : "#111412";
   ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 
@@ -413,6 +475,17 @@ function render() {
   renderList.sort((a, b) => a.y - b.y);
   renderList.forEach((item) => item.draw());
 
+  if (builderMode) {
+    props.forEach((p) => {
+      const isSel = p === selectedProp;
+      ctx.fillStyle = isSel ? "#00ffcc" : "#ffd966";
+      ctx.fillRect(p.x - 3, p.y - 3, 6, 6);
+      ctx.font = "9px Silkscreen, monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(`${p.type} (${p.x}, ${p.y})`, p.x, p.y + 12);
+    });
+  }
+
   drawAtmosphere();
   ctx.restore();
 
@@ -429,6 +502,21 @@ function render() {
   vig.addColorStop(1, "rgba(4, 3, 7, 0.62)");
   ctx.fillStyle = vig;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  if (builderMode) {
+    ctx.fillStyle = "rgba(10, 9, 14, 0.88)";
+    ctx.fillRect(14, canvas.height - 34, 520, 22);
+    ctx.strokeStyle = "#d4af37";
+    ctx.strokeRect(14, canvas.height - 34, 520, 22);
+    ctx.fillStyle = "#ffd966";
+    ctx.font = "10px Silkscreen, monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(
+      `BUILDER [${builderPropType.toUpperCase()}] | Click: Place/Drag | Tab: Cycle | Del: Remove | C: Copy`,
+      22,
+      canvas.height - 19
+    );
+  }
 }
 
 function loop() {
