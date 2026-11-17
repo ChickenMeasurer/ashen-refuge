@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ashen Refuge — Multiplayer Pixel Village</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <div id="stage">
+    <div id="canvas-shell">
+      <canvas id="gameCanvas"></canvas>
+
+      <!-- 9:16 Reel Overlay Banner -->
+      <div id="reel-header" class="hidden">
+        <div class="reel-title">ASHEN REFUGE</div>
+        <div class="reel-sub">Comment your name + class to be summoned</div>
+      </div>
+
+      <!-- Souls-style Center Screen Banner -->
+      <div id="souls-banner" class="hidden">
+        <div id="souls-banner-text">HUMANITY RESTORED</div>
+      </div>
+    </div>
+
+    <!-- Top HUD -->
+    <header id="top-hud" class="hud-element">
+      <div class="hud-group">
+        <span class="brand">⚔ ASHEN REFUGE</span>
+        <span class="pill" id="online-pill">● 0 Tarnished</span>
+        <span class="pill souls-pill" id="souls-pill">🔥 100 Souls</span>
+      </div>
+
+      <div class="hud-group">
+        <button id="btn-reel-frame" class="btn-souls" title="Toggle 9:16 Vertical Reel Frame">📱 9:16 Reel</button>
+        <button id="btn-reel-cam" class="btn-souls" title="Auto-pan camera across villagers">🎬 Reel Cam</button>
+        <button id="btn-hide-ui" class="btn-souls" title="Press H to toggle HUD">👁️ [H]</button>
+        <button id="btn-creator-drawer" class="btn-souls gold hidden">👑 Creator</button>
+        <button id="btn-auth-open" class="btn-souls gold">Join / Login</button>
+      </div>
+    </header>
+
+    <!-- Bottom Player Action Dock (visible when logged in) -->
+    <footer id="player-dock" class="hud-element hidden">
+      <div class="dock-row">
+        <input id="chat-input" type="text" maxlength="90" placeholder="Speak to the refuge (Enter)..." />
+        <button id="btn-chat-send" class="btn-souls gold">Speak</button>
+      </div>
+      <div class="dock-row gestures">
+        <button class="btn-souls sm" data-gesture="Praise">☀️ Praise</button>
+        <button class="btn-souls sm" data-gesture="Rest">🔥 Rest (+Souls)</button>
+        <button class="btn-souls sm" data-gesture="Wave">👋 Wave</button>
+        <button id="btn-soapstone-open" class="btn-souls sm gold">📜 Soapstone (-10 Souls)</button>
+      </div>
+    </footer>
+
+    <!-- Auth & Profile Modal -->
+    <div id="auth-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2 id="auth-modal-title">Enter the Ashen Refuge</h2>
+          <button class="close-btn" data-close="auth-modal">✕</button>
+        </div>
+
+        <div id="auth-forms">
+          <div class="tabs">
+            <button id="tab-signup" class="tab active">New Tarnished</button>
+            <button id="tab-login" class="tab">Returning Soul</button>
+          </div>
+          <label>Tarnished Name</label>
+          <input id="auth-username" type="text" maxlength="20" placeholder="e.g. Tarnished_Damien" />
+          <label>Password</label>
+          <input id="auth-password" type="password" placeholder="••••••" />
+          <div id="class-picker-wrap">
+            <label>Starting Origin Class</label>
+            <select id="auth-class">
+              <option value="Knight">Knight</option>
+              <option value="Sorcerer">Sorcerer</option>
+              <option value="Warrior Jar">Warrior Jar</option>
+              <option value="Maiden">Maiden</option>
+              <option value="Confessor">Confessor</option>
+              <option value="Vagabond">Vagabond</option>
+            </select>
+          </div>
+          <p id="auth-error" class="error-text"></p>
+          <button id="btn-auth-submit" class="btn-souls gold full">Summon Into World</button>
+        </div>
+
+        <div id="profile-panel" class="hidden">
+          <p id="profile-summary"></p>
+          <hr class="divider" />
+          <label>Creator Sovereign Passcode</label>
+          <div class="dock-row">
+            <input id="creator-passcode" type="password" placeholder="Enter passcode (ASHEN2026)" />
+            <button id="btn-unlock-creator" class="btn-souls gold">Unlock</button>
+          </div>
+          <p id="creator-status" class="hint-text"></p>
+          <button id="btn-logout" class="btn-souls full" style="margin-top:12px;">Leave World (Logout)</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Soapstone Writer Modal -->
+    <div id="soapstone-modal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2>Tarnished's Wizened Finger</h2>
+          <button class="close-btn" data-close="soapstone-modal">✕</button>
+        </div>
+        <label>Inscribe Ground Message (Costs 10 Souls)</label>
+        <select id="soapstone-template">
+          <option value="Praise the Sun!">Praise the Sun!</option>
+          <option value="Could this be a dog?">Could this be a dog?</option>
+          <option value="Try finger, but hole">Try finger, but hole</option>
+          <option value="Don't give up, skeleton!">Don't give up, skeleton!</option>
+          <option value="Hidden path ahead">Hidden path ahead</option>
+          <option value="Gorgeous view ahead">Gorgeous view ahead</option>
+        </select>
+        <button id="btn-soapstone-place" class="btn-souls gold full" style="margin-top:12px;">Inscribe Sign Here</button>
+      </div>
+    </div>
+
+    <!-- Soapstone Reader Popup -->
+    <div id="soapstone-reader" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h2>Glowing Rune Message</h2>
+          <button class="close-btn" data-close="soapstone-reader">✕</button>
+        </div>
+        <p id="reader-text" class="rune-quote"></p>
+        <p id="reader-meta" class="hint-text"></p>
+        <button id="btn-appraise" class="btn-souls gold full">👍 Appraise (+25 Souls to Author)</button>
+      </div>
+    </div>
+
+    <!-- Creator Sovereign Drawer -->
+    <aside id="creator-drawer" class="drawer hidden">
+      <div class="modal-header">
+        <h2>👑 Creator Sovereign</h2>
+        <button class="close-btn" data-close="creator-drawer">✕</button>
+      </div>
+      <label>Summon Commenters (one per line: @name class)</label>
+      <textarea id="batch-input" rows="5" placeholder="@alex knight&#10;@sarah jar&#10;@mike sorcerer"></textarea>
+      <button id="btn-batch-summon" class="btn-souls gold full">Summon Batch</button>
+
+      <hr class="divider" />
+      <label>World Atmosphere & Events</label>
+      <div class="grid-2">
+        <button class="btn-souls sm" data-event="ash">🌫️ Ashen Snow</button>
+        <button class="btn-souls sm" data-event="eclipse">🩸 Blood Eclipse</button>
+        <button class="btn-souls sm" data-event="erdtree">✨ Erdtree Gold</button>
+        <button class="btn-souls sm" data-event="gather">🔥 Gather Grace</button>
+      </div>
+
+      <label style="margin-top:10px;">Broadcast Souls Banner</label>
+      <div class="dock-row">
+        <input id="banner-input" type="text" placeholder="HUMANITY RESTORED" />
+        <button id="btn-banner-send" class="btn-souls gold">Cast</button>
+      </div>
+
+      <hr class="divider" />
+      <label>Summoned Villagers (<span id="npc-count">0</span>)</label>
+      <div id="npc-list" class="npc-list"></div>
+    </aside>
+  </div>
+
+  <script type="module" src="./world.js"></script>
+</body>
+</html>
