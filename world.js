@@ -56,8 +56,8 @@ let activeSoapstone = null;
 let lastMoveSent = 0;
 
 // Map  Mode state (Creator Sovereign only)
-let Mode = false;
-let PropType = "chapel";
+let builderMode = false;
+let builderPropType = "chapel";
 let selectedProp = null;
 let draggingProp = false;
 const BUILDER_TYPES = ["chapel", "arch", "lantern", "tree", "grave", "boogersorcerer"];
