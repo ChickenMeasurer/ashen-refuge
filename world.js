@@ -570,13 +570,17 @@ document.getElementById("btn-hide-ui").onclick = () => {
 };
 
 (async function boot() {
-	preloadCustomAssets();
-  const world = await net.fetchWorld();
-  npcs = world.npcs.map((n) => ({ ...n, tx: n.x, ty: n.y, wait: 40 }));
-  soapstones = world.soapstones;
-  world.online_players.forEach((p) => players.set(p.username, { ...p, targetX: p.x, targetY: p.y }));
-  renderNpcList();
-  updateHudCounts();
+  preloadCustomAssets();
+  try {
+    const world = await net.fetchWorld();
+    npcs = world.npcs.map((n) => ({ ...n, tx: n.x, ty: n.y, wait: 40 }));
+    soapstones = world.soapstones;
+    world.online_players.forEach((p) => players.set(p.username, { ...p, targetX: p.x, targetY: p.y }));
+    renderNpcList();
+    updateHudCounts();
+  } catch (err) {
+    console.error("Failed to connect to Ashen Refuge backend:", err);
+  }
 
   net.connectWS();
   const savedUser = await net.tryAutoLogin();
