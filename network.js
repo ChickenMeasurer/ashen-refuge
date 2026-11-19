@@ -86,6 +86,58 @@ export class VillageNetwork {
     });
   }
 
+  async useItem(itemId) {
+    const res = await fetch(apiUrl("/api/inventory/use"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: this.user.username, item_id: itemId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Cannot use item");
+    if (data.user) this.user = data.user;
+    return data.user;
+  }
+
+  async discardItem(itemId) {
+    const res = await fetch(apiUrl("/api/inventory/discard"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: this.user.username, item_id: itemId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Cannot discard item");
+    if (data.user) this.user = data.user;
+    return data.user;
+  }
+
+  async buyItem(itemId) {
+    const res = await fetch(apiUrl("/api/inventory/buy"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: this.user.username, item_id: itemId }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Not enough Souls");
+    if (data.user) this.user = data.user;
+    return data.user;
+  }
+
+  async grantItem(targetUsername, itemId, qty = 1) {
+    const res = await fetch(apiUrl("/api/admin/grant-item"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        admin_username: this.user.username,
+        target_username: targetUsername,
+        item_id: itemId,
+        qty,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "Grant failed");
+    return data.user;
+  }
+
   async placeSoapstone(templateText, x, y) {
     const res = await fetch(apiUrl("/api/soapstones"), {
       method: "POST",

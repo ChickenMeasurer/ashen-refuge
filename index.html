@@ -2,8 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Ashen Refuge — Multiplayer Pixel Village</title>
+  <link rel="icon" href="data:," />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="./styles.css" />
@@ -47,14 +48,58 @@
       <div class="dock-row">
         <input id="chat-input" type="text" maxlength="90" placeholder="Speak to the refuge (Enter)..." />
         <button id="btn-chat-send" class="btn-souls gold">Speak</button>
+        <button id="btn-inventory-open" class="btn-souls gold pouch-btn" title="Open Tarnished Pouch [I]">
+          <img
+            src="./assets/ui/pouch.png"
+            alt="Pouch"
+            onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';"
+          />
+          <span class="pouch-fallback">🎒</span>
+          <span id="inv-badge" class="inv-badge">0</span>
+        </button>
       </div>
       <div class="dock-row gestures">
         <button class="btn-souls sm" data-gesture="Praise">☀️ Praise</button>
         <button class="btn-souls sm" data-gesture="Rest">🔥 Rest (+Souls)</button>
         <button class="btn-souls sm" data-gesture="Wave">👋 Wave</button>
-        <button id="btn-soapstone-open" class="btn-souls sm gold">📜 Soapstone (-10 Souls)</button>
+        <button id="btn-soapstone-open" class="btn-souls sm gold">📜 Soapstone (-10)</button>
       </div>
     </footer>
+
+    <!-- Tarnished Pouch (Inventory Modal) -->
+    <div id="inventory-modal" class="modal hidden">
+      <div class="modal-card wide">
+        <div class="modal-header">
+          <h2>🎒 Tarnished Pouch</h2>
+          <button class="close-btn" data-close="inventory-modal">✕</button>
+        </div>
+        <p class="hint-text" id="inventory-souls">Available Souls: 🔥 100</p>
+
+        <!-- Icon Slot Grid -->
+        <div id="inventory-grid" class="inv-slot-grid"></div>
+
+        <!-- Selected Item Prompt (Use / Discard / Description) -->
+        <div id="inv-inspect-box" class="inv-inspect hidden">
+          <div class="inv-inspect-head">
+            <span id="inv-inspect-name" class="inv-card-title">Item Name</span>
+            <span id="inv-inspect-qty" class="hint-text">Held: 1</span>
+          </div>
+          <p id="inv-inspect-desc" class="inv-card-desc"></p>
+          <div class="dock-row" style="margin-top:8px;">
+            <button id="btn-inv-use" class="btn-souls sm gold" style="flex:1;">✨ Use</button>
+            <button id="btn-inv-discard" class="btn-souls sm danger" style="flex:1;">🗑️ Discard (1)</button>
+          </div>
+        </div>
+
+        <hr class="divider" />
+        <label>Refuge Ember Offering (Acquire Supplies)</label>
+        <div class="grid-3">
+          <button class="btn-souls sm" data-buy-item="crimson_flask">🧪 Flask (15)</button>
+          <button class="btn-souls sm" data-buy-item="ashen_ember">🔥 Ember (20)</button>
+          <button class="btn-souls sm" data-buy-item="homeward_bone">🦴 Bone (10)</button>
+        </div>
+      </div>
+    </div>
 
     <!-- Auth & Profile Modal -->
     <div id="auth-modal" class="modal hidden">
@@ -93,7 +138,7 @@
           <hr class="divider" />
           <label>Creator Sovereign Passcode</label>
           <div class="dock-row">
-            <input id="creator-passcode" type="password" placeholder="Enter passcode (ASHEN2026)" />
+            <input id="creator-passcode" type="password" placeholder="Enter passcode" />
             <button id="btn-unlock-creator" class="btn-souls gold">Unlock</button>
           </div>
           <p id="creator-status" class="hint-text"></p>
@@ -142,19 +187,41 @@
         <button class="close-btn" data-close="creator-drawer">✕</button>
       </div>
       <label>Summon Commenters (one per line: @name class)</label>
-      <textarea id="batch-input" rows="5" placeholder="@alex knight&#10;@sarah jar&#10;@mike sorcerer"></textarea>
+      <textarea id="batch-input" rows="4" placeholder="@alex knight&#10;@sarah jar&#10;@mike sorcerer"></textarea>
       <button id="btn-batch-summon" class="btn-souls gold full">Summon Batch</button>
 
       <hr class="divider" />
-      <label>World Atmosphere & Events</label>
+      <label>Time of Day</label>
       <div class="grid-2">
-        <button class="btn-souls sm" data-event="ash">🌫️ Ashen Snow</button>
-        <button class="btn-souls sm" data-event="eclipse">🩸 Blood Eclipse</button>
-        <button class="btn-souls sm" data-event="erdtree">✨ Erdtree Gold</button>
-        <button class="btn-souls sm" data-event="gather">🔥 Gather Grace</button>
+        <button class="btn-souls sm" data-time="day">☀️ Day</button>
+        <button class="btn-souls sm" data-time="dusk">🌅 Dusk</button>
+        <button class="btn-souls sm" data-time="night">🌙 Night</button>
+        <button class="btn-souls sm" data-time="eclipse">🌑 Eclipse</button>
       </div>
 
-      <label style="margin-top:10px;">Broadcast Souls Banner</label>
+      <label style="margin-top:6px;">Weather Effects</label>
+      <div class="grid-3">
+        <button class="btn-souls sm" data-weather="clear">✨ Clear</button>
+        <button class="btn-souls sm" data-weather="ash">🌫️ Ash</button>
+        <button class="btn-souls sm" data-weather="rain">🌧️ Rain</button>
+        <button class="btn-souls sm" data-weather="snow">❄️ Snow</button>
+        <button class="btn-souls sm" data-weather="erdtree">🍃 Erdtree</button>
+        <button class="btn-souls sm" data-event="gather">🔥 Gather</button>
+      </div>
+
+      <label style="margin-top:6px;">Grant Item to Tarnished</label>
+      <div class="dock-row">
+        <input id="grant-target" type="text" placeholder="Username" />
+        <select id="grant-item">
+          <option value="crimson_flask">Flask</option>
+          <option value="ashen_ember">Ember</option>
+          <option value="homeward_bone">Bone</option>
+          <option value="prism_stone">Prism</option>
+        </select>
+        <button id="btn-grant-item" class="btn-souls gold">Give</button>
+      </div>
+
+      <label style="margin-top:6px;">Broadcast Souls Banner</label>
       <div class="dock-row">
         <input id="banner-input" type="text" placeholder="HUMANITY RESTORED" />
         <button id="btn-banner-send" class="btn-souls gold">Cast</button>

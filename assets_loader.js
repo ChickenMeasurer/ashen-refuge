@@ -1,6 +1,7 @@
 export const customSprites = {};
 export const customWorlds = {};
 export const customProps = {};
+export const customParticles = {};
 
 const CLASS_FILES = {
   Knight: "knight.png",
@@ -24,6 +25,14 @@ const PROP_FILES = {
   boogersorcerer: "sorcerer.png",
 };
 
+const PARTICLE_FILES = {
+  ash: "ash.png",
+  rain: "rain.png",
+  snow: "snow.png",
+  erdtree: "erdtree.png",
+  eclipse: "eclipse.png",
+};
+
 function loadImage(src, onLoad) {
   const img = new Image();
   img.onload = () => onLoad(img);
@@ -45,6 +54,11 @@ export function preloadCustomAssets() {
   for (const [propName, file] of Object.entries(PROP_FILES)) {
     loadImage(`./assets/props/${file}`, (img) => {
       customProps[propName] = img;
+    });
+  }
+  for (const [weatherName, file] of Object.entries(PARTICLE_FILES)) {
+    loadImage(`./assets/particles/${file}`, (img) => {
+      customParticles[weatherName] = img;
     });
   }
 }

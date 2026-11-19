@@ -1,5 +1,5 @@
 import { drawSiteOfGrace, drawProp, drawSoapstone, drawVillager } from "./sprites.js";
-import { preloadCustomAssets, customWorlds } from "./assets_loader.js";
+import { preloadCustomAssets, customWorlds, customParticles } from "./assets_loader.js";
 import { VillageNetwork } from "./network.js";
 
 const canvas = document.getElementById("gameCanvas");
@@ -28,7 +28,6 @@ const props = [
   { type: "grave", x: 780, y: 260 },
 ];
 
-// Pre-seeded textured stones & grass tufts so the ground feels organic
 const groundDetails = [];
 for (let i = 0; i < 240; i++) {
   groundDetails.push({
@@ -44,18 +43,33 @@ let npcs = [];
 let players = new Map();
 let soapstones = [];
 let particles = [];
-let atmosphere = "ash";
+let timeOfDay = "day";
+let weather = "ash";
 let tick = 0;
 let keys = {};
 let targetWaypoint = null;
 let reelDirector = false;
 let directorIndex = 0;
 let directorTimer = 0;
-let cam = { x: GRACE.x, y: GRACE.y, zoom: 1.5 };
+let cam = { x: GRACE.x, y: GRACE.y, zoom: 1.5, targetZoom: 1.5 };
 let activeSoapstone = null;
 let lastMoveSent = 0;
+let selectedItemId = null;
 
-// Map  Mode state (Creator Sovereign only)
+const ITEM_FALLBACK_ICONS = {
+  crimson_flask: "🧪",
+  ashen_ember: "🔥",
+  homeward_bone: "🦴",
+  prism_stone: "💎",
+};
+
+// Logged-out camera pan & mobile pinch state
+let isPanning = false;
+let panMoved = false;
+let panLastClient = { x: 0, y: 0 };
+let pinchLastDist = 0;
+
+// Map Builder Mode state (Creator Sovereign only)
 let builderMode = false;
 let builderPropType = "chapel";
 let selectedProp = null;
@@ -105,9 +119,42 @@ const net = new VillageNetwork({
         ent.gesture = msg.gesture;
         ent.gestureTimer = 140;
       }
+    } else if (msg.type === "player_item_used") {
+      const ent = getEntityByName(msg.username);
+      if (ent) {
+        const labels = {
+          crimson_flask: "🧪",
+          ashen_ember: "🔥 +15",
+          homeward_bone: "🦴",
+          prism_stone: "💎",
+        };
+        ent.gesture = labels[msg.item_id] || "✨";
+        ent.gestureTimer = 110;
+      }
+    } else if (msg.type === "npc_sync") {
+      // Server-authoritative NPC positions so all clients match
+      const incoming = msg.npcs || [];
+      const existingByName = new Map(npcs.map((n) => [n.username.toLowerCase(), n]));
+      npcs = incoming.map((srv) => {
+        const key = srv.username.toLowerCase();
+        const prev = existingByName.get(key);
+        if (prev) {
+          prev.targetX = srv.x;
+          prev.targetY = srv.y;
+          prev.moving = srv.moving;
+          return prev;
+        }
+        return {
+          ...srv,
+          targetX: srv.x,
+          targetY: srv.y,
+          moving: srv.moving || false,
+        };
+      });
+      updateHudCounts();
     } else if (msg.type === "npcs_summoned") {
       msg.npcs.forEach((n) => {
-        npcs.push({ ...n, tx: n.x, ty: n.y, wait: 30, summonTimer: 90 });
+        npcs.push({ ...n, targetX: n.x, targetY: n.y, moving: false, summonTimer: 90 });
       });
       renderNpcList();
       updateHudCounts();
@@ -124,17 +171,19 @@ const net = new VillageNetwork({
       if (net.user) {
         net.user.souls = msg.souls;
         document.getElementById("souls-pill").textContent = `🔥 ${msg.souls} Souls`;
+        renderInventory();
       }
+    } else if (msg.type === "user_updated") {
+      if (net.user && msg.user) {
+        net.user = msg.user;
+        document.getElementById("souls-pill").textContent = `🔥 ${net.user.souls} Souls`;
+        renderInventory();
+      }
+    } else if (msg.type === "env_updated") {
+      if (msg.time_of_day) timeOfDay = msg.time_of_day;
+      if (msg.weather) weather = msg.weather;
+      syncEnvButtons();
     } else if (msg.type === "world_event") {
-      if (msg.event === "gather") {
-        npcs.forEach((n) => {
-          n.tx = GRACE.x + (Math.random() - 0.5) * 90;
-          n.ty = GRACE.y + (Math.random() - 0.5) * 70;
-          n.wait = 180;
-        });
-      } else {
-        atmosphere = msg.event;
-      }
       if (msg.banner) showBanner(msg.banner);
     }
   },
@@ -161,10 +210,100 @@ function showBanner(text) {
   setTimeout(() => el.classList.add("hidden"), 3600);
 }
 
+function syncEnvButtons() {
+  document.querySelectorAll("[data-time]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.time === timeOfDay);
+  });
+  document.querySelectorAll("[data-weather]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.weather === weather);
+  });
+}
+
+function renderInventory() {
+  if (!net.user) return;
+  const inv = net.user.inventory || [];
+  const totalCount = inv.reduce((sum, item) => sum + (item.qty || 0), 0);
+  document.getElementById("inv-badge").textContent = totalCount;
+  document.getElementById("inventory-souls").textContent = `Available Souls: 🔥 ${net.user.souls}`;
+
+  const grid = document.getElementById("inventory-grid");
+  const inspectBox = document.getElementById("inv-inspect-box");
+  grid.innerHTML = "";
+
+  if (inv.length === 0) {
+    grid.innerHTML = `<p class="hint-text" style="grid-column: 1 / -1;">Your pouch is empty.</p>`;
+    inspectBox.classList.add("hidden");
+    selectedItemId = null;
+    return;
+  }
+
+  inv.forEach((item) => {
+    const slot = document.createElement("button");
+    slot.type = "button";
+    slot.className = "inv-slot" + (item.id === selectedItemId ? " selected" : "");
+    const fallback = ITEM_FALLBACK_ICONS[item.id] || "📦";
+    slot.innerHTML = `
+      <span class="inv-slot-qty">×${item.qty}</span>
+      <img src="./assets/items/${item.id}.png" alt="${item.name}"
+           onerror="this.style.display='none'; this.nextElementSibling.style.display='inline';" />
+      <span class="inv-slot-fallback">${fallback}</span>
+      <span class="inv-slot-label">${item.name}</span>
+    `;
+    slot.onclick = () => {
+      selectedItemId = item.id;
+      renderInventory();
+    };
+    grid.appendChild(slot);
+  });
+
+  const activeItem = inv.find((i) => i.id === selectedItemId);
+  if (!activeItem) {
+    inspectBox.classList.add("hidden");
+    return;
+  }
+
+  inspectBox.classList.remove("hidden");
+  document.getElementById("inv-inspect-name").textContent = activeItem.name;
+  document.getElementById("inv-inspect-qty").textContent = `Held: ×${activeItem.qty}`;
+  document.getElementById("inv-inspect-desc").textContent = activeItem.desc || "An enigmatic relic.";
+
+  const useBtn = document.getElementById("btn-inv-use");
+  useBtn.disabled = activeItem.qty <= 0;
+  useBtn.onclick = async () => {
+    try {
+      const updated = await net.useItem(activeItem.id);
+      net.user = updated;
+      document.getElementById("souls-pill").textContent = `🔥 ${updated.souls} Souls`;
+      renderInventory();
+      if (activeItem.id === "homeward_bone") {
+        targetWaypoint = null;
+        showBanner("RETURNED TO GRACE");
+      } else if (activeItem.id === "ashen_ember") {
+        showBanner("+15 SOULS KINDLED");
+      }
+    } catch (err) {
+      showBanner(err.message.toUpperCase());
+    }
+  };
+
+  const discardBtn = document.getElementById("btn-inv-discard");
+  discardBtn.disabled = activeItem.qty <= 0;
+  discardBtn.onclick = async () => {
+    try {
+      const updated = await net.discardItem(activeItem.id);
+      net.user = updated;
+      renderInventory();
+    } catch (err) {
+      showBanner(err.message.toUpperCase());
+    }
+  };
+}
+
 function renderNpcList() {
   const list = document.getElementById("npc-list");
   list.innerHTML = "";
   npcs.forEach((n) => {
+    if (typeof n.id === "string" && n.id.startsWith("user_")) return;
     const row = document.createElement("div");
     row.className = "npc-item";
     row.innerHTML = `<span>${n.username} (${n.player_class})</span>`;
@@ -189,29 +328,52 @@ function applyUserSession(user) {
     document.getElementById("btn-creator-drawer").classList.remove("hidden");
     document.getElementById("creator-status").textContent = "Creator Sovereign active.";
   }
+  renderInventory();
   updateHudCounts();
 }
 
-for (let i = 0; i < 80; i++) {
+for (let i = 0; i < 110; i++) {
   particles.push({
     x: Math.random() * WORLD_W,
     y: Math.random() * WORLD_H,
-    vy: 0.25 + Math.random() * 0.65,
-    vx: (Math.random() - 0.5) * 0.45,
+    vy: 0.35 + Math.random() * 0.85,
+    vx: (Math.random() - 0.5) * 0.55,
     size: Math.random() > 0.72 ? 2 : 1,
+    phase: Math.random() * Math.PI * 2,
   });
 }
 
-function screenToWorld(e) {
+function screenToWorld(clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
   return {
-    x: Math.round((e.clientX - rect.left - canvas.width / 2) / cam.zoom + cam.x),
-    y: Math.round((e.clientY - rect.top - canvas.height / 2) / cam.zoom + cam.y),
+    x: Math.round((clientX - rect.left - canvas.width / 2) / cam.zoom + cam.x),
+    y: Math.round((clientY - rect.top - canvas.height / 2) / cam.zoom + cam.y),
   };
 }
 
+function clampCamera() {
+  cam.x = Math.max(120, Math.min(WORLD_W - 120, cam.x));
+  cam.y = Math.max(100, Math.min(WORLD_H - 100, cam.y));
+}
+
+function setZoom(nextZoom) {
+  cam.targetZoom = Math.max(0.75, Math.min(3.0, nextZoom));
+}
+
+// PC Mouse Wheel Zoom
+canvas.addEventListener(
+  "wheel",
+  (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.12 : 0.89;
+    setZoom(cam.targetZoom * factor);
+  },
+  { passive: false }
+);
+
+// Mouse Down (Builder, Logged-out Camera Pan, or Gameplay Click)
 canvas.addEventListener("mousedown", (e) => {
-  const { x: wx, y: wy } = screenToWorld(e);
+  const { x: wx, y: wy } = screenToWorld(e.clientX, e.clientY);
 
   if (builderMode && net.user && net.user.is_admin) {
     const hit = props.find((p) => Math.hypot(p.x - wx, p.y - wy) < 24);
@@ -227,6 +389,101 @@ canvas.addEventListener("mousedown", (e) => {
     return;
   }
 
+  if (!net.user) {
+    isPanning = true;
+    panMoved = false;
+    panLastClient = { x: e.clientX, y: e.clientY };
+    return;
+  }
+
+  handleWorldTap(wx, wy);
+});
+
+canvas.addEventListener("mousemove", (e) => {
+  if (builderMode && draggingProp && selectedProp && net.user && net.user.is_admin) {
+    const { x: wx, y: wy } = screenToWorld(e.clientX, e.clientY);
+    selectedProp.x = wx;
+    selectedProp.y = wy;
+    return;
+  }
+
+  if (isPanning && !net.user && !reelDirector) {
+    const dx = e.clientX - panLastClient.x;
+    const dy = e.clientY - panLastClient.y;
+    if (Math.hypot(dx, dy) > 3) panMoved = true;
+    cam.x -= dx / cam.zoom;
+    cam.y -= dy / cam.zoom;
+    clampCamera();
+    panLastClient = { x: e.clientX, y: e.clientY };
+  }
+});
+
+window.addEventListener("mouseup", (e) => {
+  if (isPanning && !panMoved && !net.user) {
+    const { x: wx, y: wy } = screenToWorld(e.clientX, e.clientY);
+    handleWorldTap(wx, wy);
+  }
+  isPanning = false;
+  draggingProp = false;
+});
+
+// Mobile Touch Pan & Pinch-to-Zoom
+canvas.addEventListener(
+  "touchstart",
+  (e) => {
+    if (e.touches.length === 2) {
+      isPanning = false;
+      pinchLastDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    } else if (e.touches.length === 1) {
+      const t = e.touches[0];
+      isPanning = true;
+      panMoved = false;
+      panLastClient = { x: t.clientX, y: t.clientY };
+    }
+  },
+  { passive: false }
+);
+
+canvas.addEventListener(
+  "touchmove",
+  (e) => {
+    e.preventDefault();
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      if (pinchLastDist > 0) {
+        setZoom(cam.targetZoom * (dist / pinchLastDist));
+      }
+      pinchLastDist = dist;
+    } else if (e.touches.length === 1 && isPanning && !net.user && !reelDirector) {
+      const t = e.touches[0];
+      const dx = t.clientX - panLastClient.x;
+      const dy = t.clientY - panLastClient.y;
+      if (Math.hypot(dx, dy) > 4) panMoved = true;
+      cam.x -= dx / cam.zoom;
+      cam.y -= dy / cam.zoom;
+      clampCamera();
+      panLastClient = { x: t.clientX, y: t.clientY };
+    }
+  },
+  { passive: false }
+);
+
+canvas.addEventListener("touchend", (e) => {
+  if (e.touches.length < 2) pinchLastDist = 0;
+  if (e.touches.length === 0 && isPanning && !panMoved) {
+    const { x: wx, y: wy } = screenToWorld(panLastClient.x, panLastClient.y);
+    handleWorldTap(wx, wy);
+  }
+  if (e.touches.length === 0) isPanning = false;
+});
+
+function handleWorldTap(wx, wy) {
   const hitStone = soapstones.find((s) => Math.hypot(s.x - wx, s.y - wy) < 18);
   if (hitStone) {
     activeSoapstone = hitStone;
@@ -243,26 +500,24 @@ canvas.addEventListener("mousedown", (e) => {
       y: Math.max(230, Math.min(640, wy)),
     };
   }
-});
-
-canvas.addEventListener("mousemove", (e) => {
-  if (!builderMode || !draggingProp || !selectedProp || !net.user || !net.user.is_admin) return;
-  const { x: wx, y: wy } = screenToWorld(e);
-  selectedProp.x = wx;
-  selectedProp.y = wy;
-});
-
-window.addEventListener("mouseup", () => {
-  draggingProp = false;
-});
+}
 
 window.addEventListener("keydown", (e) => {
-  if (document.activeElement.tagName === "INPUT" || document.activeElement.tagName === "TEXTAREA") return;
+  if (
+    document.activeElement.tagName === "INPUT" ||
+    document.activeElement.tagName === "TEXTAREA" ||
+    document.activeElement.tagName === "SELECT"
+  ) {
+    return;
+  }
   const k = e.key.toLowerCase();
   keys[k] = true;
 
   if (k === "h") {
     document.querySelectorAll(".hud-element").forEach((el) => el.classList.toggle("hidden"));
+  } else if (k === "i" && net.user) {
+    renderInventory();
+    document.getElementById("inventory-modal").classList.toggle("hidden");
   } else if (k === "b") {
     if (!net.user || !net.user.is_admin) return;
     builderMode = !builderMode;
@@ -290,6 +545,7 @@ window.addEventListener("keyup", (e) => (keys[e.key.toLowerCase()] = false));
 
 function update() {
   tick++;
+  cam.zoom += (cam.targetZoom - cam.zoom) * 0.14;
 
   if (net.user) {
     let dx = 0;
@@ -327,6 +583,19 @@ function update() {
     if (tick % 300 === 0 && Math.hypot(net.user.x - GRACE.x, net.user.y - GRACE.y) < 75) {
       net.send({ type: "earn_souls" });
     }
+  } else if (!isPanning) {
+    // Allow WASD/Arrow keys to pan camera smoothly when logged out
+    let px = 0;
+    let py = 0;
+    if (keys["w"] || keys["arrowup"]) py -= 4;
+    if (keys["s"] || keys["arrowdown"]) py += 4;
+    if (keys["a"] || keys["arrowleft"]) px -= 4;
+    if (keys["d"] || keys["arrowright"]) px += 4;
+    if (px !== 0 || py !== 0) {
+      cam.x += px;
+      cam.y += py;
+      clampCamera();
+    }
   }
 
   players.forEach((p) => {
@@ -340,21 +609,12 @@ function update() {
     }
   });
 
+  // Smoothly interpolate NPCs toward authoritative server positions
   npcs.forEach((n) => {
-    if (n.wait > 0) {
-      n.wait--;
-      n.moving = false;
-      return;
-    }
-    const dist = Math.hypot(n.tx - n.x, n.ty - n.y);
-    if (dist > 3) {
-      n.x += ((n.tx - n.x) / dist) * 0.85;
-      n.y += ((n.ty - n.y) / dist) * 0.85;
-      n.moving = true;
-    } else {
-      n.wait = 90 + Math.floor(Math.random() * 180);
-      n.tx = 320 + Math.random() * 560;
-      n.ty = 260 + Math.random() * 320;
+    const dist = Math.hypot(n.targetX - n.x, n.targetY - n.y);
+    if (dist > 0.8) {
+      n.x += (n.targetX - n.x) * 0.16;
+      n.y += (n.targetY - n.y) * 0.16;
     }
   });
 
@@ -369,23 +629,18 @@ function update() {
       const focus = roster[directorIndex % roster.length];
       cam.x += (focus.x - cam.x) * 0.04;
       cam.y += (focus.y - cam.y) * 0.04;
-      cam.zoom += (1.9 - cam.zoom) * 0.04;
+      cam.targetZoom = 1.9;
     }
   } else if (net.user) {
     cam.x += (net.user.x - cam.x) * 0.08;
     cam.y += (net.user.y - cam.y) * 0.08;
-    cam.zoom += (1.65 - cam.zoom) * 0.08;
-  } else {
-    cam.x += (GRACE.x - cam.x) * 0.05;
-    cam.y += (GRACE.y - cam.y) * 0.05;
-    cam.zoom += (1.45 - cam.zoom) * 0.05;
   }
 }
 
 function drawGround() {
-  // Deep mossy earth outer terrain
-  if (customWorlds[atmosphere]) {
-    ctx.drawImage(customWorlds[atmosphere], 0, 0, WORLD_W, WORLD_H);
+  const worldImg = customWorlds[weather] || customWorlds[timeOfDay];
+  if (worldImg) {
+    ctx.drawImage(worldImg, 0, 0, WORLD_W, WORLD_H);
     if (targetWaypoint) {
       ctx.strokeStyle = "rgba(212, 175, 55, 0.85)";
       ctx.lineWidth = 1.5;
@@ -395,23 +650,21 @@ function drawGround() {
     }
     return;
   }
-  ctx.fillStyle = atmosphere === "eclipse" ? "#140b10" : "#111412";
+
+  ctx.fillStyle = timeOfDay === "eclipse" ? "#140b10" : "#111412";
   ctx.fillRect(0, 0, WORLD_W, WORLD_H);
 
-  // Outer grass & ash speckles
   groundDetails.forEach((d) => {
     ctx.fillStyle =
       d.tone === 0 ? "#19211b" : d.tone === 1 ? "#1e1c24" : d.tone === 2 ? "#252b23" : "#161918";
     ctx.fillRect(d.x, d.y, d.w, d.h);
   });
 
-  // Cross-shaped stone courtyard & central plaza (instead of a rigid box)
   ctx.fillStyle = "#1d1b24";
-  ctx.fillRect(340, 340, 520, 170); // East-West promenade
-  ctx.fillRect(490, 235, 220, 385); // North-South chapel approach
-  ctx.fillRect(430, 305, 340, 240); // Central Grace square
+  ctx.fillRect(340, 340, 520, 170);
+  ctx.fillRect(490, 235, 220, 385);
+  ctx.fillRect(430, 305, 340, 240);
 
-  // Varied cobblestone bricks
   for (let gx = 348; gx < 850; gx += 16) {
     for (let gy = 242; gy < 610; gy += 12) {
       const inPlaza =
@@ -421,13 +674,12 @@ function drawGround() {
       if (!inPlaza) continue;
       const offset = (gy / 12) % 2 === 0 ? 0 : 7;
       const hash = (gx * 13 + gy * 7) % 5;
-      if (hash === 0) continue; // Natural worn gaps
+      if (hash === 0) continue;
       ctx.fillStyle = hash === 1 ? "#2b2836" : hash === 2 ? "#24212e" : "#312d3d";
       ctx.fillRect(gx + offset, gy, 12, 8);
     }
   }
 
-  // Click waypoint ring
   if (targetWaypoint) {
     ctx.strokeStyle = "rgba(212, 175, 55, 0.85)";
     ctx.lineWidth = 1.5;
@@ -437,29 +689,73 @@ function drawGround() {
   }
 }
 
-function drawAtmosphere() {
+function drawWeather() {
+  if (weather === "clear") return;
+  const sprite = customParticles[weather];
+
   particles.forEach((p) => {
-    p.y += atmosphere === "erdtree" ? -p.vy : p.vy;
-    p.x += p.vx;
+    if (weather === "rain") {
+      p.y += p.vy * 4.2;
+      p.x -= 1.1;
+    } else if (weather === "snow") {
+      p.y += p.vy * 0.65;
+      p.x += Math.sin(tick * 0.03 + p.phase) * 0.35;
+    } else if (weather === "erdtree") {
+      p.y -= p.vy * 0.85;
+      p.x += Math.sin(tick * 0.02 + p.phase) * 0.25;
+    } else {
+      // ash or eclipse
+      p.y += p.vy;
+      p.x += p.vx;
+    }
+
     if (p.y > WORLD_H) p.y = 0;
     if (p.y < 0) p.y = WORLD_H;
+    if (p.x > WORLD_W) p.x = 0;
+    if (p.x < 0) p.x = WORLD_W;
 
-    ctx.fillStyle =
-      atmosphere === "eclipse"
-        ? "rgba(225, 45, 65, 0.6)"
-        : atmosphere === "erdtree"
-        ? "rgba(255, 215, 90, 0.72)"
-        : "rgba(220, 215, 230, 0.38)";
-    ctx.fillRect(Math.round(p.x), Math.round(p.y), p.size, p.size);
+    const rx = Math.round(p.x);
+    const ry = Math.round(p.y);
+
+    if (sprite) {
+      ctx.drawImage(sprite, rx, ry);
+    } else if (weather === "rain") {
+      ctx.fillStyle = "rgba(145, 195, 255, 0.55)";
+      ctx.fillRect(rx, ry, 1, 6);
+    } else if (weather === "snow") {
+      ctx.fillStyle = "rgba(240, 248, 255, 0.78)";
+      ctx.fillRect(rx, ry, 2, 2);
+    } else if (weather === "erdtree") {
+      ctx.fillStyle = "rgba(255, 215, 90, 0.75)";
+      ctx.fillRect(rx, ry, p.size, p.size);
+    } else if (weather === "eclipse") {
+      ctx.fillStyle = "rgba(225, 45, 65, 0.68)";
+      ctx.fillRect(rx, ry, p.size, p.size);
+    } else {
+      ctx.fillStyle = "rgba(220, 215, 230, 0.38)";
+      ctx.fillRect(rx, ry, p.size, p.size);
+    }
   });
+}
+
+function drawTimeOfDayTint() {
+  if (timeOfDay === "day") return;
+  if (timeOfDay === "dusk") {
+    ctx.fillStyle = "rgba(255, 125, 45, 0.14)";
+  } else if (timeOfDay === "night") {
+    ctx.fillStyle = "rgba(10, 16, 38, 0.44)";
+  } else if (timeOfDay === "eclipse") {
+    ctx.fillStyle = "rgba(70, 8, 18, 0.36)";
+  }
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
 function render() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.save();
-  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.translate(Math.round(canvas.width / 2), Math.round(canvas.height / 2));
   ctx.scale(cam.zoom, cam.zoom);
-  ctx.translate(-cam.x, -cam.y);
+  ctx.translate(-Math.round(cam.x), -Math.round(cam.y));
 
   drawGround();
   soapstones.forEach((s) => drawSoapstone(ctx, s, tick));
@@ -486,8 +782,10 @@ function render() {
     });
   }
 
-  drawAtmosphere();
+  drawWeather();
   ctx.restore();
+
+  drawTimeOfDayTint();
 
   // Atmospheric dark vignette around viewport edges
   const vig = ctx.createRadialGradient(
@@ -588,14 +886,70 @@ document.getElementById("btn-batch-summon").onclick = async () => {
   box.value = "";
 };
 
+// Separate Time of Day & Weather buttons
+document.querySelectorAll("[data-time]").forEach((btn) => {
+  btn.onclick = () => {
+    timeOfDay = btn.dataset.time;
+    syncEnvButtons();
+    net.send({ type: "admin_env", time_of_day: timeOfDay });
+  };
+});
+
+document.querySelectorAll("[data-weather]").forEach((btn) => {
+  btn.onclick = () => {
+    weather = btn.dataset.weather;
+    syncEnvButtons();
+    net.send({ type: "admin_env", weather });
+  };
+});
+
 document.querySelectorAll("[data-event]").forEach((btn) => {
   btn.onclick = () => net.send({ type: "admin_event", event: btn.dataset.event });
 });
 
 document.getElementById("btn-banner-send").onclick = () => {
   const text = document.getElementById("banner-input").value.trim() || "HUMANITY RESTORED";
-  net.send({ type: "admin_event", event: atmosphere, banner: text });
+  net.send({ type: "admin_event", event: "banner", banner: text });
 };
+
+// Grant Item (Creator)
+const grantBtn = document.getElementById("btn-grant-item");
+if (grantBtn) {
+  grantBtn.onclick = async () => {
+    const target = document.getElementById("grant-target").value.trim();
+    const itemId = document.getElementById("grant-item").value;
+    if (!target) return;
+    try {
+      await net.grantItem(target, itemId, 1);
+      showBanner(`GRANTED TO ${target.toUpperCase()}`);
+      document.getElementById("grant-target").value = "";
+    } catch (e) {
+      showBanner(e.message.toUpperCase());
+    }
+  };
+}
+
+// Inventory Pouch Toggle & Quick Purchase
+const invBtn = document.getElementById("btn-inventory-open");
+if (invBtn) {
+  invBtn.onclick = () => {
+    renderInventory();
+    document.getElementById("inventory-modal").classList.toggle("hidden");
+  };
+}
+
+document.querySelectorAll("[data-buy-item]").forEach((btn) => {
+  btn.onclick = async () => {
+    try {
+      const updated = await net.buyItem(btn.dataset.buyItem);
+      net.user = updated;
+      document.getElementById("souls-pill").textContent = `🔥 ${updated.souls} Souls`;
+      renderInventory();
+    } catch (e) {
+      showBanner(e.message.toUpperCase());
+    }
+  };
+});
 
 function sendChat() {
   const input = document.getElementById("chat-input");
@@ -630,6 +984,7 @@ document.getElementById("btn-soapstone-place").onclick = async () => {
   const text = document.getElementById("soapstone-template").value;
   const res = await net.placeSoapstone(text, Math.round(net.user.x), Math.round(net.user.y));
   if (res.user) {
+    net.user = res.user;
     document.getElementById("souls-pill").textContent = `🔥 ${res.user.souls} Souls`;
   }
   document.getElementById("soapstone-modal").classList.add("hidden");
@@ -661,9 +1016,19 @@ document.getElementById("btn-hide-ui").onclick = () => {
   preloadCustomAssets();
   try {
     const world = await net.fetchWorld();
-    npcs = world.npcs.map((n) => ({ ...n, tx: n.x, ty: n.y, wait: 40 }));
-    soapstones = world.soapstones;
-    world.online_players.forEach((p) => players.set(p.username, { ...p, targetX: p.x, targetY: p.y }));
+    npcs = (world.npcs || []).map((n) => ({
+      ...n,
+      targetX: n.x,
+      targetY: n.y,
+      moving: n.moving || false,
+    }));
+    soapstones = world.soapstones || [];
+    (world.online_players || []).forEach((p) =>
+      players.set(p.username, { ...p, targetX: p.x, targetY: p.y })
+    );
+    if (world.time_of_day) timeOfDay = world.time_of_day;
+    if (world.weather) weather = world.weather;
+    syncEnvButtons();
     renderNpcList();
     updateHudCounts();
   } catch (err) {
