@@ -1,6 +1,6 @@
 // Leave empty "" for local testing (http://localhost:8000).
 // Before pushing to GitHub Pages, paste your Cloudflare Tunnel URL here (no trailing slash):
-const API_BASE = "https://bracelet-pvc-asus-craig.trycloudflare.com"; // e.g. "https://ashen-api.yourdomain.com"
+const API_BASE = "https://philosophy-zinc-nominated-sit.trycloudflare.com"; // e.g. "https://ashen-api.yourdomain.com"
 
 function apiUrl(path) {
   return `${API_BASE}${path}`;
